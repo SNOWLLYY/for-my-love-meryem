@@ -194,7 +194,7 @@ function reset() {
   $("#forHer").classList.remove("show"); $("#madeBy").classList.remove("show"); $("#replay").classList.remove("show");
 }
 reset();
-cv.addEventListener("click", () => { if (canReplay) { reset(); playSong(); } });
+cv.addEventListener("click", () => { if (canReplay) { reset(); playSong(); notify("replay"); } });
 
 /* ---------- music + sound effects (start on her first tap) ---------- */
 // the song (Angel, 1:45 to 2:12), played once with a fade in and a fade out
@@ -302,10 +302,15 @@ function updateSongVolume(dt) {
   const target = .9 * clamp(at / 1.2) * clamp((d - at) / 3) * songDuck;
   try { song.volume = clamp(song.volume + (target - song.volume) * clamp(dt * 6)); } catch (e) {}
 }
+// quietly tell Mohamed's Discord when it is opened / watched to the end (only on the real site)
+function notify(e) {
+  if (!/vercel.app$/.test(location.hostname)) return;
+  try { navigator.sendBeacon("/api/seen", JSON.stringify({ e })); } catch (err) {}
+}
 function begin() {
   if (started) return;
   try { if (!ac) initAudio(); ac.resume?.(); } catch (e) {}
-  playSong(); reset(); started = true;
+  playSong(); reset(); started = true; notify("open");
   $("#start").classList.add("hide");
 }
 $("#start").addEventListener("click", begin);
@@ -339,7 +344,7 @@ function update(dt) {
     if (stageT > 1.6) explode();
   }
   if (stage === "boom") {
-    if (stageT > 4.6 && !captionOn) { captionOn = true; $("#forHer").classList.add("show"); setTimeout(() => $("#madeBy").classList.add("show"), 1500); }
+    if (stageT > 4.6 && !captionOn) { captionOn = true; notify("end"); $("#forHer").classList.add("show"); setTimeout(() => $("#madeBy").classList.add("show"), 1500); }
     if (stageT > 7.5 && !canReplay) { canReplay = true; $("#replay").classList.add("show"); }
   }
   R += (Rgoal - R) * clamp(dt * (stage === "boom" ? 10 : 2.5));
