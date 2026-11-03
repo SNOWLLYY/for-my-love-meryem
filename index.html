@@ -198,10 +198,11 @@ cv.addEventListener("click", () => { if (canReplay) { reset(); playSong(); } });
 
 /* ---------- music + sound effects (start on her first tap) ---------- */
 // the song (Angel, 1:45 to 2:12), played once with a fade in and a fade out
-const songData = fetch("music.mp3").then(r => r.arrayBuffer()).catch(() => null);
-let songBuf = null, songSrc = null;
+const song = new Audio("music.mp3");
+song.preload = "auto"; song.playsInline = true;
+let songDuck = 1, songReturn = false;
 let ac = null, master, droneGain, droneFilter, windGain, windFilter, soundOn = true, lastGulp = 0, started = false;
-let reverb = null, songGain = null;
+let reverb = null;
 function noiseBuffer(sec, brown) {
   const buf = ac.createBuffer(1, ac.sampleRate * sec, ac.sampleRate), d = buf.getChannelData(0);
   let lastV = 0;
@@ -223,7 +224,6 @@ function initAudio() {
   ac = new (window.AudioContext || window.webkitAudioContext)();
   master = ac.createGain(); master.gain.value = soundOn ? .9 : 0; master.connect(ac.destination);
   reverb = makeReverb(4.5);
-  songGain = ac.createGain(); songGain.gain.value = 1; songGain.connect(master);
   // low rumble of the black hole
   droneFilter = ac.createBiquadFilter(); droneFilter.type = "lowpass"; droneFilter.frequency.value = 160;
   droneGain = ac.createGain(); droneGain.gain.value = 0;
@@ -252,7 +252,7 @@ function updateSfx() {
 function riseSound() {
   if (!ac) return;
   const now = ac.currentTime;
-  songGain.gain.setTargetAtTime(.3, now, .35);
+  songDuck = .3;
   const src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
   src.buffer = noiseBuffer(2, false);
   f.type = "lowpass"; f.frequency.setValueAtTime(150, now); f.frequency.exponentialRampToValueAtTime(3500, now + 1.5);
@@ -278,33 +278,29 @@ function boomSound() {
     o.connect(og).connect(master); o.start(now); o.stop(now + 3.1);
   });
   // the music swells back in under the heart
-  songGain.gain.cancelScheduledValues(now);
-  songGain.gain.setValueAtTime(.3, now);
-  songGain.gain.linearRampToValueAtTime(1, now + 3.5);
+  songDuck = .3; songReturn = true;
 }
 function setSound(on) {
-  soundOn = on;
+  soundOn = on; song.muted = !on;
   if (master) master.gain.value = on ? .9 : 0;
   $("#soundBtn").textContent = on ? "sound on" : "sound off";
   $("#soundBtn").setAttribute("aria-pressed", on);
 }
 $("#soundBtn").addEventListener("click", () => setSound(!soundOn));
-function stopSong() { if (songSrc) { try { songSrc.stop(); } catch (e) {} songSrc = null; } }
-async function playSong() {
-  if (!ac) return;
-  stopSong();
-  const asked = ac.currentTime;
-  if (!songBuf) {
-    const data = await songData; if (!data) return;
-    try { songBuf = await ac.decodeAudioData(data.slice(0)); } catch (e) { return; }
-  }
-  // if decoding took a moment, start that far in so the music stays in step with the animation
-  const offset = Math.min(ac.currentTime - asked, 2), now = ac.currentTime, len = songBuf.duration - offset;
-  const g = ac.createGain(); g.connect(songGain);
-  songGain.gain.cancelScheduledValues(now); songGain.gain.setValueAtTime(1, now);
-  g.gain.setValueAtTime(.0001, now); g.gain.exponentialRampToValueAtTime(.9, now + 1.2);
-  g.gain.setValueAtTime(.9, now + len - 3); g.gain.linearRampToValueAtTime(0, now + len);
-  songSrc = ac.createBufferSource(); songSrc.buffer = songBuf; songSrc.connect(g); songSrc.start(now, offset);
+function playSong() {
+  // let the sound effects play through the media channel too (iPhone silent switch)
+  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+  songDuck = 1;
+  song.muted = !soundOn; song.volume = 0;
+  try { song.currentTime = 0; } catch (e) {}
+  const p = song.play(); if (p && p.catch) p.catch(() => {});
+}
+// fade in, dip before the blast, fade out at the end (phones that lock the volume just play it at full)
+function updateSongVolume(dt) {
+  if (song.paused) return;
+  const d = song.duration || 27, at = song.currentTime;
+  const target = .9 * clamp(at / 1.2) * clamp((d - at) / 3) * songDuck;
+  try { song.volume = clamp(song.volume + (target - song.volume) * clamp(dt * 6)); } catch (e) {}
 }
 function begin() {
   if (started) return;
@@ -355,6 +351,8 @@ function update(dt) {
   if (stage !== "critical") shake *= Math.exp(-dt * 4);
 
   updateSfx();
+  if (songReturn) { songDuck = Math.min(1, songDuck + dt / 3.5); if (songDuck >= 1) songReturn = false; }
+  updateSongVolume(dt);
 
   // accretion disk
   for (const p of disk) {
